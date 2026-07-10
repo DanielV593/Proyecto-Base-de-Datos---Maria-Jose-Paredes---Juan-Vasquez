@@ -282,7 +282,7 @@ INSERT INTO inventario (tipo_movimiento, cantidad, documento_referencia, id_prod
 ('Entrada', 180, 'Factura Proveedor 19', 19, 2), ('Entrada', 50, 'Factura Proveedor 20', 20, 2),
 ('Entrada', 75, 'Factura Proveedor 21', 21, 2), ('Entrada', 80, 'Factura Proveedor 22', 22, 2);
 
--- 2.5 Comprobacion de Registros (SELECT)
+-- Comprobacion de Registros (SELECT)
 -- 1. Verificar Catálogos (Tablas maestras)
 SELECT * FROM categorias;
 SELECT * FROM proveedores;
@@ -403,3 +403,257 @@ JOIN ventas v ON d.id_venta = v.id_venta
 JOIN clientes c ON v.id_cliente = c.id_cliente
 JOIN productos p ON d.id_producto = p.id_producto
 ORDER BY d.fecha_devolucion DESC;
+
+-- Consulta 11. Total vendido por vendedor
+SELECT e.nombres AS Vendedor, COUNT(v.id_venta) AS CantidadVentas, SUM(v.total_factura) AS TotalVendido 
+FROM ventas v 
+JOIN empleados e ON v.id_empleado = e.id_empleado 
+GROUP BY e.id_empleado, e.nombres 
+ORDER BY TotalVendido DESC;
+
+-- Consulta 12. Productos más vendidos
+SELECT p.nombre_modelo AS Producto, SUM(dv.cantidad) AS TotalUnidadesVendidas 
+FROM detalle_venta dv 
+JOIN productos p ON dv.id_producto = p.id_producto 
+GROUP BY p.id_producto, p.nombre_modelo 
+ORDER BY TotalUnidadesVendidas DESC;
+
+-- Consulta 13.2 Ventas totales por mes (un solo mes)
+SELECT 
+    EXTRACT(MONTH FROM fecha_emision) AS Mes, 
+    COUNT(*) AS TotalVentas, 
+    SUM(total_factura) AS MontoTotal 
+FROM ventas 
+GROUP BY EXTRACT(MONTH FROM fecha_emision) 
+ORDER BY Mes;
+
+-- 13.2 Ventas totales por mes (Mostrando todos los meses del año)
+-- Script adicional para pruebas de ventas anuales
+-- 1. Ventas adicionales distribuidas en todo el año 2026
+INSERT INTO ventas (numero_factura, fecha_emision, subtotal, iva, total_factura, metodo_pago, id_cliente, id_empleado, id_promocion) VALUES
+('FAC-053', '2026-01-15 10:30:00', 120.00, 14.40, 134.40, 'Efectivo', 1, 3, 7),
+('FAC-054', '2026-02-20 14:15:00', 80.00, 9.60, 89.60, 'Tarjeta', 2, 4, NULL),
+('FAC-055', '2026-03-10 09:45:00', 150.00, 18.00, 168.00, 'Transferencia', 3, 5, 11),
+('FAC-056', '2026-04-05 16:20:00', 60.00, 7.20, 67.20, 'Efectivo', 4, 3, 12),
+('FAC-057', '2026-05-12 11:10:00', 200.00, 24.00, 224.00, 'Tarjeta', 5, 4, 2),
+('FAC-058', '2026-06-18 13:30:00', 90.00, 10.80, 100.80, 'Transferencia', 6, 5, 1),
+('FAC-059', '2026-08-22 15:45:00', 110.00, 13.20, 123.20, 'Efectivo', 7, 3, 4),
+('FAC-060', '2026-09-05 10:05:00', 75.00, 9.00, 84.00, 'Tarjeta', 8, 4, 4),
+('FAC-061', '2026-10-11 12:50:00', 180.00, 21.60, 201.60, 'Transferencia', 9, 5, 10),
+('FAC-062', '2026-11-25 17:15:00', 300.00, 36.00, 336.00, 'Efectivo', 10, 3, 5),
+('FAC-063', '2026-12-20 18:30:00', 400.00, 48.00, 448.00, 'Tarjeta', 11, 4, 6),
+('FAC-064', '2026-12-23 19:00:00', 250.00, 30.00, 280.00, 'Transferencia', 12, 5, 6);
+
+-- 2. Detalles de venta (Asignamos los productos a esas nuevas facturas)
+-- Nota: Los IDs de venta asumen que continúan desde el 53 en adelante.
+INSERT INTO detalle_venta (cantidad, precio_unitario, subtotal_linea, id_venta, id_producto) VALUES
+(2, 60.00, 120.00, 53, 2), 
+(1, 80.00, 80.00, 54, 18), 
+(2, 75.00, 150.00, 55, 11),
+(1, 60.00, 60.00, 56, 2), 
+(4, 50.00, 200.00, 57, 1), 
+(2, 45.00, 90.00, 58, 5),
+(2, 55.00, 110.00, 59, 6), 
+(1, 75.00, 75.00, 60, 11), 
+(2, 90.00, 180.00, 61, 8),
+(6, 50.00, 300.00, 62, 1), 
+(8, 50.00, 400.00, 63, 1), 
+(5, 50.00, 250.00, 64, 1);
+
+SELECT 
+    m.NombreMes AS Mes, 
+    COUNT(v.id_venta) AS TotalVentas, 
+    COALESCE(SUM(v.total_factura), 0.00) AS MontoTotal
+FROM (
+    SELECT 1 AS MesNum, 'Enero' AS NombreMes UNION ALL
+    SELECT 2, 'Febrero' UNION ALL
+    SELECT 3, 'Marzo' UNION ALL
+    SELECT 4, 'Abril' UNION ALL
+    SELECT 5, 'Mayo' UNION ALL
+    SELECT 6, 'Junio' UNION ALL
+    SELECT 7, 'Julio' UNION ALL
+    SELECT 8, 'Agosto' UNION ALL
+    SELECT 9, 'Septiembre' UNION ALL
+    SELECT 10, 'Octubre' UNION ALL
+    SELECT 11, 'Noviembre' UNION ALL
+    SELECT 12, 'Diciembre'
+) AS m
+LEFT JOIN ventas v ON m.MesNum = EXTRACT(MONTH FROM v.fecha_emision)
+GROUP BY m.MesNum, m.NombreMes
+ORDER BY m.MesNum;
+
+-- Consulta 14. Compras acumuladas por cliente
+SELECT c.nombres_completos AS Cliente, COUNT(v.id_venta) AS CantidadCompras, 
+SUM(v.total_factura) AS MontoAcumulado 
+FROM clientes c 
+JOIN ventas v ON c.id_cliente = v.id_cliente 
+GROUP BY c.id_cliente, c.nombres_completos 
+ORDER BY MontoAcumulado DESC;
+
+-- Consulta 15. Devoluciones por vendedor
+SELECT e.nombres AS Vendedor, COUNT(d.id_devolucion) AS TotalDevoluciones 
+FROM devoluciones d 
+JOIN empleados e ON d.id_empleado = e.id_empleado 
+GROUP BY e.id_empleado, e.nombres 
+ORDER BY TotalDevoluciones DESC;
+
+-- Consulta 16. Clientes con compras superiores al promedio (Subconsulta)
+SELECT 
+    c.nombres_completos AS Cliente, 
+    SUM(v.total_factura) AS TotalComprado 
+FROM clientes c 
+JOIN ventas v ON c.id_cliente = v.id_cliente 
+GROUP BY c.id_cliente, c.nombres_completos 
+HAVING SUM(v.total_factura) > (SELECT AVG(total_factura) FROM ventas);
+
+-- Consulta 17. Productos con precio superior al promedio (Subconsulta)
+SELECT nombre_modelo AS Producto, precio_venta 
+FROM productos 
+WHERE precio_venta > (SELECT AVG(precio_venta) FROM productos);
+
+-- Consulta 18. Vendedores con ventas superiores al promedio (Subconsulta)
+SELECT 
+    e.nombres AS Vendedor, 
+    SUM(v.total_factura) AS TotalVendido 
+FROM ventas v 
+JOIN empleados e ON v.id_empleado = e.id_empleado 
+GROUP BY e.id_empleado, e.nombres 
+HAVING SUM(v.total_factura) > (SELECT AVG(total_factura) FROM ventas);
+
+-- Consulta 19. Productos que nunca se han vendido (Subconsulta)
+-- Insercion de datos para ejemplo
+INSERT INTO productos (sku, nombre_modelo, talla, color, material, costo_compra, precio_venta, stock_actual, stock_minimo, id_categoria, id_proveedor) VALUES 
+('SKU998', 'Zapatillas Aburridas', 40.0, 'Gris', 'Sintetico', 15.00, 30.00, 50, 10, 2, 1),
+('SKU999', 'Botas Pasadas de Moda', 38.0, 'Cafe', 'Sintetico', 20.00, 40.00, 30, 5, 2, 2);
+SELECT 
+    id_producto, 
+    nombre_modelo, 
+    stock_actual 
+FROM productos 
+WHERE id_producto NOT IN (SELECT DISTINCT id_producto FROM detalle_venta);
+
+-- Consulta 20. Clientes que nunca han realizado compras (Subconsulta)
+-- Insercion de datos de ejemplo para la consulta
+INSERT INTO clientes (tipo_identificacion, identificacion, nombres_completos, telefono, email, direccion_envio, ciudad) VALUES 
+('Cedula', '1799999990', 'Carlos Inactivo', '0990001111', 'carlos.inactivo@mail.com', 'Norte de Quito', 'Quito'),
+('Cedula', '1799999991', 'Marta SinCompras', '0990002222', 'marta.sincompras@mail.com', 'Sur de Quito', 'Quito');
+
+SELECT 
+    id_cliente, 
+    identificacion, 
+    nombres_completos, 
+    telefono 
+FROM clientes 
+WHERE id_cliente NOT IN (SELECT DISTINCT id_cliente FROM ventas);
+
+-- Vistas
+-- Vista 1: Clientes Frecuentes
+CREATE VIEW ClientesFrecuentes AS 
+SELECT c.id_cliente, c.nombres_completos, c.ciudad, COUNT(v.id_venta) AS TotalCompras, 
+SUM(v.total_factura) AS MontoAcumulado 
+FROM clientes c 
+JOIN ventas v ON c.id_cliente = v.id_cliente 
+GROUP BY c.id_cliente, c.nombres_completos, c.ciudad 
+HAVING COUNT(v.id_venta) > 2 
+ORDER BY MontoAcumulado DESC;
+SELECT * FROM ClientesFrecuentes;
+
+-- Vista 2: Ventas Consolidadas
+CREATE VIEW VentasConsolidadas AS 
+SELECT v.id_venta, v.numero_factura, v.fecha_emision, c.nombres_completos AS Cliente, e.nombres AS Vendedor, v.metodo_pago, v.subtotal, v.iva, v.total_factura 
+FROM ventas v 
+JOIN clientes c ON v.id_cliente = c.id_cliente 
+JOIN empleados e ON v.id_empleado = e.id_empleado;
+SELECT * FROM VentasConsolidadas;
+
+-- Vista 3: Productos con Bajo Stock
+CREATE VIEW ProductosBajoStock AS 
+SELECT p.id_producto, p.nombre_modelo, c.nombre AS Categoria, p.stock_actual, p.stock_minimo 
+FROM productos p 
+JOIN categorias c ON p.id_categoria = c.id_categoria 
+WHERE p.stock_actual <= p.stock_minimo;
+SELECT * FROM ProductosBajoStock;
+
+
+-- Vista 4: Promociones Aplicadas
+CREATE VIEW PromocionesAplicadas AS 
+SELECT v.id_venta, v.numero_factura, c.nombres_completos AS Cliente, p.codigo_promo AS Promocion, p.tipo_descuento, p.valor_descuento, v.subtotal, v.total_factura 
+FROM ventas v 
+JOIN clientes c ON v.id_cliente = c.id_cliente 
+LEFT JOIN promociones p ON v.id_promocion = p.id_promocion 
+WHERE v.id_promocion IS NOT NULL;
+SELECT * FROM PromocionesAplicadas;
+
+-- Vista 5: Devoluciones Detalladas
+CREATE VIEW DevolucionesDetalladas AS 
+SELECT d.id_devolucion, d.fecha_devolucion, c.nombres_completos AS Cliente, p.nombre_modelo 
+AS Producto, d.cantidad_devuelta, d.motivo, d.estado_calzado, e.nombres AS RegistradoPor 
+FROM devoluciones d 
+JOIN ventas v ON d.id_venta = v.id_venta 
+JOIN clientes c ON v.id_cliente = c.id_cliente 
+JOIN productos p ON d.id_producto = p.id_producto 
+JOIN empleados e ON d.id_empleado = e.id_empleado;
+SELECT * FROM DevolucionesDetalladas;
+
+-- Vista 6: Desempeño de Vendedores
+CREATE VIEW DesempenoVendedores AS 
+SELECT e.id_empleado, e.nombres, e.apellidos, COUNT(v.id_venta) AS TotalVentas, SUM(v.total_factura) AS MontoGenerado, COUNT(d.id_devolucion) AS TotalDevoluciones 
+FROM empleados e 
+LEFT JOIN ventas v ON e.id_empleado = v.id_empleado 
+LEFT JOIN devoluciones d ON e.id_empleado = d.id_empleado 
+GROUP BY e.id_empleado, e.nombres, e.apellidos;
+SELECT * FROM DesempenoVendedores;
+
+-- Usuarios, Roles y Privilegios
+-- 1. CREACIÓN DE USUARIOS
+CREATE USER 'usuario_admin'@'localhost' IDENTIFIED BY 'admin123';
+CREATE USER 'usuario_gerente'@'localhost' IDENTIFIED BY 'gerente123';
+CREATE USER 'usuario_cajero'@'localhost' IDENTIFIED BY 'cajero123';
+CREATE USER 'usuario_vendedor'@'localhost' IDENTIFIED BY 'vendedor123';
+CREATE USER 'usuario_auditor'@'localhost' IDENTIFIED BY 'auditor123';
+
+-- 2. ASIGNACIÓN DE PRIVILEGIOS SEGÚN EL ROL OPERATIVO
+-- ADMINISTRADOR: Control total de la estructura y manipulación de datos
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP 
+ON SistemaCalzado_2026.* TO 'usuario_admin'@'localhost';
+
+-- GERENTE: Lectura estratégica de datos core y ejecución de reportes analíticos
+GRANT SELECT ON SistemaCalzado_2026.ventas TO 'usuario_gerente'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.clientes TO 'usuario_gerente'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.productos TO 'usuario_gerente'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.categorias TO 'usuario_gerente'@'localhost';
+-- Permisos de lectura en vistas analíticas
+GRANT SELECT ON SistemaCalzado_2026.ClientesFrecuentes TO 'usuario_gerente'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.DesempenoVendedores TO 'usuario_gerente'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.VentasConsolidadas TO 'usuario_gerente'@'localhost';
+-- Permiso de ejecución para procedimientos de reportes
+GRANT EXECUTE ON PROCEDURE SistemaCalzado_2026.AplicarPromocion TO 'usuario_gerente'@'localhost';
+
+-- CAJERO: Gestión operativa de puntos de venta y facturación directa
+GRANT SELECT ON SistemaCalzado_2026.clientes TO 'usuario_cajero'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.productos TO 'usuario_cajero'@'localhost';
+GRANT INSERT ON SistemaCalzado_2026.ventas TO 'usuario_cajero'@'localhost';
+GRANT INSERT ON SistemaCalzado_2026.detalle_venta TO 'usuario_cajero'@'localhost';
+-- Permiso para ejecutar la automatización de la facturación
+GRANT EXECUTE ON PROCEDURE SistemaCalzado_2026.RegistrarVenta TO 'usuario_cajero'@'localhost';
+
+-- VENDEDOR: Consulta de catálogos, vistas comerciales e inserción de nuevas ventas
+GRANT SELECT ON SistemaCalzado_2026.clientes TO 'usuario_vendedor'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.productos TO 'usuario_vendedor'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.VentasConsolidadas TO 'usuario_vendedor'@'localhost';
+GRANT INSERT ON SistemaCalzado_2026.ventas TO 'usuario_vendedor'@'localhost';
+GRANT INSERT ON SistemaCalzado_2026.detalle_venta TO 'usuario_vendedor'@'localhost';
+
+-- AUDITOR: Acceso exclusivo de lectura a registros de control y logs de auditoría
+GRANT SELECT ON SistemaCalzado_2026.auditoria TO 'usuario_auditor'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.inventario TO 'usuario_auditor'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.DevolucionesDetalladas TO 'usuario_auditor'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.ProductosBajoStock TO 'usuario_auditor'@'localhost';
+
+-- 3. APLICACIÓN EFECTIVA DE PRIVILEGIOS
+FLUSH PRIVILEGES;
+SHOW GRANTS FOR 'usuario_admin'@'localhost';
+SHOW GRANTS FOR 'usuario_gerente'@'localhost';
+SHOW GRANTS FOR 'usuario_cajero'@'localhost';
+SHOW GRANTS FOR 'usuario_vendedor'@'localhost';
+SHOW GRANTS FOR 'usuario_auditor'@'localhost';
