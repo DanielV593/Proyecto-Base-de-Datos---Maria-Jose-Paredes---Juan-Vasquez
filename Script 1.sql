@@ -3,7 +3,7 @@ DROP DATABASE IF EXISTS SistemaCalzado_2026;
 CREATE DATABASE SistemaCalzado_2026;
 USE SistemaCalzado_2026;
 
--- Creacion de las Tablas DDL (11 tablas totales)
+-- Creacion de las Tablas DDL (12 tablas totales)
 CREATE TABLE categorias (
     id_categoria INT AUTO_INCREMENT PRIMARY KEY,
     nombre VARCHAR(50) NOT NULL,
@@ -134,7 +134,15 @@ CREATE TABLE inventario (
     FOREIGN KEY (id_empleado) REFERENCES empleados(id_empleado)
 );
 
-USE SistemaCalzado_2026;
+CREATE TABLE quejas (
+    id_queja INT AUTO_INCREMENT PRIMARY KEY,
+    id_cliente INT NOT NULL,
+    descripcion TEXT NOT NULL,
+    fecha_queja DATETIME DEFAULT CURRENT_TIMESTAMP,
+    estado VARCHAR(30) DEFAULT 'Pendiente',
+    FOREIGN KEY (id_cliente) REFERENCES clientes(id_cliente)
+);
+
 -- Insercion de Datos Maestros (Catalogos)
 -- Categorías (5)
 INSERT INTO categorias (nombre, descripcion, genero_calzado) VALUES 
@@ -282,6 +290,14 @@ INSERT INTO inventario (tipo_movimiento, cantidad, documento_referencia, id_prod
 ('Entrada', 180, 'Factura Proveedor 19', 19, 2), ('Entrada', 50, 'Factura Proveedor 20', 20, 2),
 ('Entrada', 75, 'Factura Proveedor 21', 21, 2), ('Entrada', 80, 'Factura Proveedor 22', 22, 2);
 
+-- Quejas (5 minimas)
+INSERT INTO quejas (id_cliente, descripcion, estado) VALUES
+(1, 'La caja de los zapatos formales llegó completamente aplastada y raspada.', 'Pendiente'),
+(2, 'Solicito reembolso, el material del calzado no es cuero como indicaba la etiqueta.', 'En revisión'),
+(3, 'Los cordones de los botines vinieron rotos y manchados.', 'Resuelta'),
+(4, 'El calzado Oxford me aprieta demasiado a pesar de ser mi talla habitual.', 'En revisión'),
+(5, 'Nunca me aplicaron el descuento de la promoción de VERANO en mi tarjeta.', 'Resuelta');
+
 -- Comprobacion de Registros (SELECT)
 -- 1. Verificar Catálogos (Tablas maestras)
 SELECT * FROM categorias;
@@ -405,7 +421,8 @@ JOIN productos p ON d.id_producto = p.id_producto
 ORDER BY d.fecha_devolucion DESC;
 
 -- Consulta 11. Total vendido por vendedor
-SELECT e.nombres AS Vendedor, COUNT(v.id_venta) AS CantidadVentas, SUM(v.total_factura) AS TotalVendido 
+SELECT e.nombres AS Vendedor, COUNT(v.id_venta) AS CantidadVentas, 
+SUM(v.total_factura) AS TotalVendido 
 FROM ventas v 
 JOIN empleados e ON v.id_empleado = e.id_empleado 
 GROUP BY e.id_empleado, e.nombres 
@@ -418,7 +435,8 @@ JOIN productos p ON dv.id_producto = p.id_producto
 GROUP BY p.id_producto, p.nombre_modelo 
 ORDER BY TotalUnidadesVendidas DESC;
 
--- Consulta 13.2 Ventas totales por mes (un solo mes)
+-- Consulta 13
+-- 13.1. Ventas totales por mes (un solo mes)
 SELECT 
     EXTRACT(MONTH FROM fecha_emision) AS Mes, 
     COUNT(*) AS TotalVentas, 
@@ -525,6 +543,7 @@ HAVING SUM(v.total_factura) > (SELECT AVG(total_factura) FROM ventas);
 INSERT INTO productos (sku, nombre_modelo, talla, color, material, costo_compra, precio_venta, stock_actual, stock_minimo, id_categoria, id_proveedor) VALUES 
 ('SKU998', 'Zapatillas Aburridas', 40.0, 'Gris', 'Sintetico', 15.00, 30.00, 50, 10, 2, 1),
 ('SKU999', 'Botas Pasadas de Moda', 38.0, 'Cafe', 'Sintetico', 20.00, 40.00, 30, 5, 2, 2);
+use sistemacalzado_2026;
 SELECT 
     id_producto, 
     nombre_modelo, 
@@ -597,12 +616,349 @@ SELECT * FROM DevolucionesDetalladas;
 
 -- Vista 6: Desempeño de Vendedores
 CREATE VIEW DesempenoVendedores AS 
-SELECT e.id_empleado, e.nombres, e.apellidos, COUNT(v.id_venta) AS TotalVentas, SUM(v.total_factura) AS MontoGenerado, COUNT(d.id_devolucion) AS TotalDevoluciones 
+SELECT e.id_empleado, e.nombres, e.apellidos, COUNT(v.id_venta) AS TotalVentas, 
+SUM(v.total_factura) AS MontoGenerado, COUNT(d.id_devolucion) AS TotalDevoluciones 
 FROM empleados e 
 LEFT JOIN ventas v ON e.id_empleado = v.id_empleado 
 LEFT JOIN devoluciones d ON e.id_empleado = d.id_empleado 
 GROUP BY e.id_empleado, e.nombres, e.apellidos;
 SELECT * FROM DesempenoVendedores;
+
+
+-- FUNCIONES
+-- 1. FUNCION: Calcular IVA (15%)
+DELIMITER //
+CREATE FUNCTION calcular_iva(monto DECIMAL(10,2)) 
+RETURNS DECIMAL(10,2)
+DETERMINISTIC
+BEGIN
+    RETURN monto * 0.15;
+END //
+DELIMITER ;
+SELECT calcular_iva(100) AS iva_calculado;
+
+-- 2. FUNCION: Calcular Descuento
+DELIMITER //
+CREATE FUNCTION calcular_descuento(monto DECIMAL(10,2), porcentaje DECIMAL(5,2)) 
+RETURNS DECIMAL(10,2)
+DETERMINISTIC
+BEGIN
+    RETURN monto * (porcentaje / 100);
+END //
+DELIMITER ;
+SELECT calcular_descuento(50, 20) AS descuento_calculado;
+
+-- 3. FUNCION: Calcular Edad
+DELIMITER //
+CREATE FUNCTION calcular_edad(fecha_nacimiento DATE) 
+RETURNS INT
+DETERMINISTIC
+BEGIN
+    -- TIMESTAMPDIFF calcula los años exactos transcurridos hasta hoy
+    RETURN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE());
+END //
+DELIMITER ;
+SELECT calcular_edad('1995-05-15') AS edad_cliente;
+
+-- 4. FUNCION: Calcular Comisión
+DELIMITER //
+CREATE FUNCTION calcular_comision(monto_ventas DECIMAL(10,2)) 
+RETURNS DECIMAL(10,2)
+DETERMINISTIC
+BEGIN
+    DECLARE comision DECIMAL(10,2);
+    
+    IF monto_ventas >= 1000 THEN
+        SET comision = monto_ventas * 0.05; -- 5% si supera los $1000
+    ELSE
+        SET comision = monto_ventas * 0.02; -- 2% si es menor
+    END IF;
+    
+    RETURN comision;
+END //
+DELIMITER ;
+SELECT calcular_comision(1500) AS comision_ganada;
+
+-- 5. PROCEDIMIENTO: Productos Bajo Stock
+-- (Se usa PROCEDURE porque devuelve una tabla)
+DELIMITER //
+CREATE PROCEDURE productos_bajo_stock()
+BEGIN
+    SELECT id_producto, nombre_modelo, stock_actual, stock_minimo
+    FROM productos
+    WHERE stock_actual < stock_minimo;
+END //
+DELIMITER ;
+CALL productos_bajo_stock();
+
+-- 6. PROCEDIMIENTO: Clientes Frecuentes
+-- (Se usa PROCEDURE porque devuelve una tabla)
+DELIMITER //
+CREATE PROCEDURE clientes_frecuentes(IN monto_minimo DECIMAL(10,2))
+BEGIN
+    SELECT c.id_cliente, 
+           CONCAT(c.nombres, ' ', c.apellidos) AS nombre_completo, 
+           SUM(v.total_factura) AS total_comprado
+    FROM clientes c
+    JOIN ventas v ON c.id_cliente = v.id_cliente
+    GROUP BY c.id_cliente, c.nombres, c.apellidos
+    HAVING SUM(v.total_factura) >= monto_minimo
+    ORDER BY total_comprado DESC;
+END //
+DELIMITER ;
+CALL clientes_frecuentes(500);
+
+-- Procedimientos Almacenados
+
+-- 1. PROCEDIMIENTO: Registrar Cliente
+DELIMITER //
+CREATE PROCEDURE registrar_cliente(
+    IN p_tipo_id VARCHAR(20),
+    IN p_identificacion VARCHAR(15), 
+    IN p_nombres_completos VARCHAR(150), 
+    IN p_telefono VARCHAR(20), 
+    IN p_email VARCHAR(100)
+)
+BEGIN
+    DECLARE existe INT;
+    SELECT COUNT(*) INTO existe FROM clientes WHERE identificacion = p_identificacion;
+    
+    IF existe > 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: El cliente ya se encuentra registrado.';
+    ELSE
+        INSERT INTO clientes (tipo_identificacion, identificacion, nombres_completos, telefono, email) 
+        VALUES (p_tipo_id, p_identificacion, p_nombres_completos, p_telefono, p_email);
+    END IF;
+END //
+DELIMITER ;
+CALL registrar_cliente('Cedula', '1745655145', 'Pedro Martinez', '0988888888', 'pedro@email.com');
+SELECT * FROM clientes WHERE identificacion = '1745655145';
+
+
+-- 2. PROCEDIMIENTO: Registrar Producto
+DELIMITER //
+CREATE PROCEDURE registrar_producto(
+    IN p_sku VARCHAR(50),
+    IN p_nombre VARCHAR(150), 
+    IN p_talla DECIMAL(4,1),
+    IN p_costo DECIMAL(10,2),
+    IN p_precio DECIMAL(10,2), 
+    IN p_stock INT, 
+    IN p_id_categoria INT,
+    IN p_id_proveedor INT
+)
+BEGIN
+    DECLARE v_pais VARCHAR(50);
+    DECLARE v_tipo VARCHAR(20);
+    
+    SELECT pais_origen INTO v_pais FROM proveedores WHERE id_proveedor = p_id_proveedor;
+    
+    IF v_pais = 'Ecuador' THEN
+        SET v_tipo = 'Nacional';
+    ELSE
+        SET v_tipo = 'Importado';
+    END IF;
+    
+    INSERT INTO productos (sku, nombre_modelo, talla, costo_compra, precio_venta, stock_actual, id_categoria, id_proveedor) 
+    VALUES (p_sku, CONCAT(p_nombre, ' (', v_tipo, ')'), p_talla, p_costo, p_precio, p_stock, p_id_categoria, p_id_proveedor);
+END //
+DELIMITER ;
+CALL registrar_producto('SKU-999', 'Oxford Ejecutivo', 42.0, 30.00, 65.00, 50, 1, 1);
+SELECT * FROM productos WHERE sku = 'SKU-999';
+
+
+-- 3. PROCEDIMIENTO: Registrar Venta
+DELIMITER //
+CREATE PROCEDURE registrar_venta(
+    IN p_factura VARCHAR(50),
+    IN p_id_cliente INT, 
+    IN p_id_empleado INT, 
+    IN p_id_producto INT, 
+    IN p_cantidad INT,
+    IN p_metodo_pago VARCHAR(50)
+)
+BEGIN
+    DECLARE v_precio DECIMAL(10,2);
+    DECLARE v_stock INT;
+    DECLARE v_subtotal DECIMAL(10,2);
+    DECLARE v_iva DECIMAL(10,2);
+    DECLARE v_total DECIMAL(10,2);
+    DECLARE v_id_venta INT;
+    
+    SELECT precio_venta, stock_actual INTO v_precio, v_stock FROM productos WHERE id_producto = p_id_producto;
+    
+    IF v_stock >= p_cantidad THEN
+        SET v_subtotal = v_precio * p_cantidad;
+        SET v_iva = v_subtotal * 0.15;
+        SET v_total = v_subtotal + v_iva;
+        
+        INSERT INTO ventas (numero_factura, subtotal, iva, total_factura, metodo_pago, id_cliente, id_empleado) 
+        VALUES (p_factura, v_subtotal, v_iva, v_total, p_metodo_pago, p_id_cliente, p_id_empleado);
+        
+        SET v_id_venta = LAST_INSERT_ID();
+        
+        INSERT INTO detalle_venta (cantidad, precio_unitario, subtotal_linea, id_venta, id_producto) 
+        VALUES (p_cantidad, v_precio, v_subtotal, v_id_venta, p_id_producto);
+        
+        UPDATE productos SET stock_actual = stock_actual - p_cantidad WHERE id_producto = p_id_producto;
+        
+        INSERT INTO inventario (tipo_movimiento, cantidad, documento_referencia, id_producto, id_empleado)
+        VALUES ('SALIDA VENTA', p_cantidad, p_factura, p_id_producto, p_id_empleado);
+    ELSE
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Stock insuficiente para realizar la venta.';
+    END IF;
+END //
+DELIMITER ;
+CALL registrar_venta('FAC-997', 1, 1, 1, 2, 'Efectivo');
+SELECT * FROM ventas WHERE numero_factura = 'FAC-997';
+SELECT * FROM inventario WHERE documento_referencia = 'FAC-997';
+
+
+-- 4. PROCEDIMIENTO: Registrar Devolución
+DELIMITER //
+CREATE PROCEDURE registrar_devolucion(
+    IN p_id_venta INT, 
+    IN p_id_producto INT, 
+    IN p_cantidad INT, 
+    IN p_motivo VARCHAR(200),
+    IN p_estado_calzado VARCHAR(50),
+    IN p_id_empleado INT
+)
+BEGIN
+    INSERT INTO devoluciones (motivo, cantidad_devuelta, estado_calzado, id_venta, id_producto, id_empleado) 
+    VALUES (p_motivo, p_cantidad, p_estado_calzado, p_id_venta, p_id_producto, p_id_empleado);
+    
+    UPDATE productos SET stock_actual = stock_actual + p_cantidad WHERE id_producto = p_id_producto;
+    
+    INSERT INTO inventario (tipo_movimiento, cantidad, documento_referencia, id_producto, id_empleado)
+    VALUES ('ENTRADA DEVOLUCION', p_cantidad, CONCAT('Devolucion Factura ', p_id_venta), p_id_producto, p_id_empleado);
+END //
+DELIMITER ;
+CALL registrar_devolucion(1, 1, 1, 'Talla incorrecta', 'Nuevo', 1);
+SELECT * FROM devoluciones ORDER BY id_devolucion DESC LIMIT 1;
+
+-- 5. PROCEDIMIENTO: Aplicar Promoción
+DELIMITER //
+CREATE PROCEDURE aplicar_promocion(
+    IN p_codigo_promo VARCHAR(20),
+    IN p_monto_original DECIMAL(10,2)
+)
+BEGIN
+    DECLARE v_descuento DECIMAL(10,2);
+    DECLARE v_tipo VARCHAR(20);
+    DECLARE v_monto_final DECIMAL(10,2);
+    
+    SELECT valor_descuento, tipo_descuento INTO v_descuento, v_tipo 
+    FROM promociones 
+    WHERE codigo_promo = p_codigo_promo AND CURDATE() BETWEEN fecha_inicio AND fecha_fin;
+    
+    IF v_descuento IS NOT NULL THEN
+        IF v_tipo = 'Porcentaje' THEN
+            SET v_monto_final = p_monto_original - (p_monto_original * (v_descuento / 100));
+        ELSE
+            SET v_monto_final = p_monto_original - v_descuento;
+        END IF;
+        -- Este SELECT interno hace que el procedimiento devuelva la tabla directamente
+        SELECT p_monto_original AS Monto_Original, v_monto_final AS Monto_Con_Descuento, 'Promocion Aplicada' AS Estado;
+    ELSE
+        SELECT p_monto_original AS Monto_Original, p_monto_original AS Monto_Con_Descuento, 'Promocion Invalida o Expirada' AS Estado;
+    END IF;
+END //
+DELIMITER ;
+CALL aplicar_promocion('VERANO', 100.00);
+SELECT codigo_promo, tipo_descuento, valor_descuento, fecha_inicio, fecha_fin 
+FROM promociones 
+WHERE codigo_promo = 'VERANO';
+
+
+-- 6. PROCEDIMIENTO: Calcular Ventas Mensuales
+DELIMITER //
+CREATE PROCEDURE calcular_ventas_mensuales(IN p_anio INT)
+BEGIN
+    -- Este SELECT interno devuelve la tabla agrupada
+    SELECT MONTH(fecha_emision) AS Mes, SUM(total_factura) AS TotalVentas
+    FROM ventas
+    WHERE YEAR(fecha_emision) = p_anio
+    GROUP BY MONTH(fecha_emision)
+    ORDER BY Mes;
+END //
+DELIMITER ;
+CALL calcular_ventas_mensuales(2026);
+SELECT numero_factura, fecha_emision, total_factura, estado_venta
+FROM ventas 
+WHERE YEAR(fecha_emision) = 2026;
+
+-- 7. PROCEDIMIENTO: Registrar Proveedor
+DROP PROCEDURE IF EXISTS registrar_proveedor;
+DELIMITER //
+CREATE PROCEDURE registrar_proveedor(
+    IN p_ruc VARCHAR(15), 
+    IN p_razon_social VARCHAR(150), 
+    IN p_pais VARCHAR(50), 
+    IN p_telefono VARCHAR(20),
+    IN p_email VARCHAR(100)
+)
+BEGIN
+    INSERT INTO proveedores (ruc_proveedor, razon_social, pais_origen, telefono_contacto, email) 
+    VALUES (p_ruc, p_razon_social, p_pais, p_telefono, p_email);
+END //
+DELIMITER ;
+CALL registrar_proveedor('0999999999001', 'Calzado Ecuatoriano Cia Ltda', 'Ecuador', '042999999', 'contacto@calzado.ec');
+SELECT * FROM proveedores WHERE ruc_proveedor = '0999999999001';
+
+
+-- 8. PROCEDIMIENTO: Actualizar Inventario
+DELIMITER //
+CREATE PROCEDURE actualizar_inventario(
+    IN p_id_producto INT, 
+    IN p_cantidad INT, 
+    IN p_tipo_movimiento VARCHAR(30),
+    IN p_id_empleado INT
+)
+BEGIN
+    IF p_tipo_movimiento LIKE '%ENTRADA%' THEN
+        UPDATE productos SET stock_actual = stock_actual + p_cantidad WHERE id_producto = p_id_producto;
+    ELSEIF p_tipo_movimiento LIKE '%SALIDA%' THEN
+        UPDATE productos SET stock_actual = stock_actual - p_cantidad WHERE id_producto = p_id_producto;
+    END IF;
+    
+    INSERT INTO inventario (tipo_movimiento, cantidad, documento_referencia, id_producto, id_empleado)
+    VALUES (p_tipo_movimiento, p_cantidad, 'Ajuste Manual', p_id_producto, p_id_empleado);
+END //
+DELIMITER ;
+CALL actualizar_inventario(2, 50, 'ENTRADA AJUSTE', 1);
+SELECT * FROM inventario ORDER BY id_movimiento DESC LIMIT 1;
+
+-- 9. PROCEDIMIENTO: Registrar Queja
+DELIMITER //
+CREATE PROCEDURE registrar_queja(IN p_id_cliente INT, IN p_descripcion TEXT)
+BEGIN
+    INSERT INTO quejas (id_cliente, descripcion) 
+    VALUES (p_id_cliente, p_descripcion);
+END //
+DELIMITER ;
+CALL registrar_queja(1, 'El calzado me quedó grande, solicito cambio.');
+SELECT * FROM quejas ORDER BY id_queja DESC LIMIT 1;
+
+
+-- 10. PROCEDIMIENTO: Registrar Auditoría
+DELIMITER //
+CREATE PROCEDURE registrar_auditoria(
+    IN p_tabla VARCHAR(50), 
+    IN p_accion VARCHAR(50), 
+    IN p_usuario VARCHAR(100),
+    IN p_detalle TEXT
+)
+BEGIN
+    INSERT INTO auditoria (nombre_tabla, accion_realizada, usuario_db, detalle_cambios) 
+    VALUES (p_tabla, p_accion, p_usuario, p_detalle);
+END //
+DELIMITER ;
+CALL registrar_auditoria('clientes', 'INSERT', 'admin_sistema', 'Se insertó un nuevo cliente de prueba');
+SELECT * FROM auditoria ORDER BY id_auditoria DESC LIMIT 1;
+
+-- Triggers
+
 
 -- Usuarios, Roles y Privilegios
 -- 1. CREACIÓN DE USUARIOS
@@ -611,6 +967,8 @@ CREATE USER 'usuario_gerente'@'localhost' IDENTIFIED BY 'gerente123';
 CREATE USER 'usuario_cajero'@'localhost' IDENTIFIED BY 'cajero123';
 CREATE USER 'usuario_vendedor'@'localhost' IDENTIFIED BY 'vendedor123';
 CREATE USER 'usuario_auditor'@'localhost' IDENTIFIED BY 'auditor123';
+
+
 
 -- 2. ASIGNACIÓN DE PRIVILEGIOS SEGÚN EL ROL OPERATIVO
 -- ADMINISTRADOR: Control total de la estructura y manipulación de datos
