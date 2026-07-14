@@ -958,60 +958,401 @@ CALL registrar_auditoria('clientes', 'INSERT', 'admin_sistema', 'Se insertó un 
 SELECT * FROM auditoria ORDER BY id_auditoria DESC LIMIT 1;
 
 -- Triggers
+-- 1. Auditoría INSERT Clientes
+DELIMITER //
+CREATE TRIGGER trg_audit_insert_clientes
+AFTER INSERT ON clientes
+FOR EACH ROW
+BEGIN
+    INSERT INTO auditoria (nombre_tabla, accion_realizada, usuario_db, detalle_cambios)
+    VALUES ('clientes', 'INSERT', CURRENT_USER(), CONCAT('Nuevo cliente registrado: ', NEW.identificacion, ' - ', NEW.nombres_completos));
+END //
+DELIMITER ;
 
+-- EJECUCIÓN (Insertamos un cliente de prueba)
+INSERT INTO clientes (tipo_identificacion, identificacion, nombres_completos, telefono, email, tipo_cliente) 
+VALUES ('Cedula', '0000000001', 'Test Trigger Insert', '0999999999', 'test@mail.com', 'Minorista');
+
+-- VERIFICACIÓN
+SELECT * FROM auditoria 
+WHERE accion_realizada = 'INSERT' AND nombre_tabla = 'clientes' 
+ORDER BY id_auditoria DESC LIMIT 1;
+
+-- 2. Auditoría UPDATE Clientes
+DELIMITER //
+CREATE TRIGGER trg_audit_update_clientes
+AFTER UPDATE ON clientes
+FOR EACH ROW
+BEGIN
+    INSERT INTO auditoria (nombre_tabla, accion_realizada, usuario_db, detalle_cambios)
+    VALUES ('clientes', 'UPDATE', CURRENT_USER(), CONCAT('ID: ', OLD.identificacion, ' | Antes: ', OLD.nombres_completos, ' | Después: ', NEW.nombres_completos));
+END //
+DELIMITER ;
+
+-- EJECUCIÓN (Actualizamos el cliente que creamos arriba)
+UPDATE clientes SET nombres_completos = 'Test Trigger Update' WHERE identificacion = '0000000001';
+
+-- VERIFICACIÓN 
+SELECT * FROM auditoria 
+WHERE accion_realizada = 'UPDATE' AND nombre_tabla = 'clientes' 
+ORDER BY id_auditoria DESC LIMIT 1;
+
+-- 3. Auditoría DELETE Clientes
+DELIMITER //
+CREATE TRIGGER trg_audit_delete_clientes
+AFTER DELETE ON clientes
+FOR EACH ROW
+BEGIN
+    INSERT INTO auditoria (nombre_tabla, accion_realizada, usuario_db, detalle_cambios)
+    VALUES ('clientes', 'DELETE', CURRENT_USER(), CONCAT('Cliente eliminado: ', OLD.identificacion, ' - ', OLD.nombres_completos));
+END //
+DELIMITER ;
+
+-- EJECUCIÓN (Borramos el cliente de prueba)
+DELETE FROM clientes WHERE identificacion = '0000000001';
+
+-- VERIFICACIÓN 
+SELECT * FROM auditoria 
+WHERE accion_realizada = 'DELETE' AND nombre_tabla = 'clientes' 
+ORDER BY id_auditoria DESC LIMIT 1;
+
+-- 4. Descontar Stock por Venta
+DELIMITER //
+CREATE TRIGGER trg_descontar_stock_venta
+AFTER INSERT ON detalle_venta
+FOR EACH ROW
+BEGIN
+    UPDATE productos 
+    SET stock_actual = stock_actual - NEW.cantidad 
+    WHERE id_producto = NEW.id_producto;
+END //
+DELIMITER ;
+
+-- EJECUCIÓN 
+INSERT INTO detalle_venta (cantidad, precio_unitario, subtotal_linea, id_venta, id_producto) 
+VALUES (2, 50.00, 100.00, 1, 1);
+
+-- VERIFICACIÓN 
+SELECT id_producto, nombre_modelo, stock_actual 
+FROM productos 
+WHERE id_producto = 1;
+
+-- 5. Incrementar Stock por Devolución
+DELIMITER //
+CREATE TRIGGER trg_incrementar_stock_devolucion
+AFTER INSERT ON devoluciones
+FOR EACH ROW
+BEGIN
+    UPDATE productos 
+    SET stock_actual = stock_actual + NEW.cantidad_devuelta 
+    WHERE id_producto = NEW.id_producto;
+END //
+DELIMITER ;
+
+-- EJECUCIÓN 
+INSERT INTO devoluciones (motivo, cantidad_devuelta, estado_calzado, id_venta, id_producto, id_empleado) 
+VALUES ('Prueba de Trigger', 2, 'Nuevo', 1, 1, 1);
+
+-- VERIFICACIÓN 
+SELECT id_producto, nombre_modelo, stock_actual 
+FROM productos 
+WHERE id_producto = 1;
+
+-- 6. Control de Stock Negativo
+DELIMITER //
+CREATE TRIGGER trg_control_stock_negativo
+BEFORE UPDATE ON productos
+FOR EACH ROW
+BEGIN
+    IF NEW.stock_actual < 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: El stock no puede ser menor a cero.';
+    END IF;
+END //
+DELIMITER ;
+
+-- EJECUCIÓN Y VERIFICACIÓN
+UPDATE productos SET stock_actual = -5 WHERE id_producto = 2;
+
+-- 7. Registro de Cambio de Precio
+DELIMITER //
+CREATE TRIGGER trg_cambio_precio
+AFTER UPDATE ON productos
+FOR EACH ROW
+BEGIN
+    IF OLD.precio_venta != NEW.precio_venta THEN
+        INSERT INTO auditoria (nombre_tabla, accion_realizada, usuario_db, detalle_cambios)
+        VALUES ('productos', 'UPDATE PRECIO', CURRENT_USER(), CONCAT('SKU: ', NEW.sku, ' | Precio anterior: $', OLD.precio_venta, ' | Nuevo precio: $', NEW.precio_venta));
+    END IF;
+END //
+DELIMITER ;
+
+-- EJECUCIÓN 
+UPDATE productos SET precio_venta = 99.99 WHERE id_producto = 3;
+
+-- VERIFICACIÓN
+SELECT * FROM auditoria 
+WHERE accion_realizada = 'UPDATE PRECIO' 
+ORDER BY id_auditoria DESC LIMIT 1;
+
+-- 8. Registro de Acceso
+DELIMITER //
+CREATE PROCEDURE registrar_acceso_login(IN p_usuario_app VARCHAR(100))
+BEGIN
+    INSERT INTO auditoria (nombre_tabla, accion_realizada, usuario_db, detalle_cambios)
+    VALUES ('sistema', 'LOGIN', CURRENT_USER(), CONCAT('El usuario ', p_usuario_app, ' ha iniciado sesión exitosamente.'));
+END //
+DELIMITER ;
+
+-- EJECUCIÓN 
+CALL registrar_acceso_login('admin_caja_01');
+
+-- VERIFICACIÓN
+SELECT * FROM auditoria 
+WHERE accion_realizada = 'LOGIN' 
+ORDER BY id_auditoria DESC LIMIT 1;
+
+-- Transacciones
+-- 1. Registro de Venta Segura (Con ROLLBACK)
+DELIMITER //
+CREATE PROCEDURE tx_venta(IN p_fac VARCHAR(20), IN p_cli INT, IN p_emp INT, IN p_prod INT, IN p_cant INT, IN p_pago VARCHAR(20))
+BEGIN
+    DECLARE v_precio, v_sub, v_iva, v_tot DECIMAL(10,2);
+    DECLARE v_stock, v_id INT;
+    
+    -- Manejador de errores
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION 
+    BEGIN 
+        ROLLBACK; 
+        SELECT 'Error: Se aplicó ROLLBACK' AS Estado; 
+    END;
+
+    START TRANSACTION;
+    SELECT precio_venta, stock_actual INTO v_precio, v_stock 
+    FROM productos WHERE id_producto = p_prod FOR UPDATE;
+    
+    IF v_stock >= p_cant THEN
+        SET v_sub = v_precio * p_cant, v_iva = v_sub * 0.15, v_tot = v_sub + v_iva;
+        
+        INSERT INTO ventas (numero_factura, subtotal, iva, total_factura, metodo_pago, id_cliente, id_empleado) 
+        VALUES (p_fac, v_sub, v_iva, v_tot, p_pago, p_cli, p_emp);
+        SET v_id = LAST_INSERT_ID();
+        
+        INSERT INTO detalle_venta (cantidad, precio_unitario, subtotal_linea, id_venta, id_producto) 
+        VALUES (p_cant, v_precio, v_sub, v_id, p_prod);
+        
+        COMMIT;
+        SELECT 'Éxito: Se guardó la venta (COMMIT)' AS Estado;
+    ELSE
+        ROLLBACK;
+        SELECT 'Error: Sin stock (ROLLBACK)' AS Estado;
+    END IF;
+END //
+DELIMITER ;
+
+-- EJECUCIÓN 
+CALL tx_venta('FAC-TX-001', 1, 1, 2, 1, 'Tarjeta');
+
+-- VERIFICACIÓN
+SELECT v.numero_factura, v.total_factura, d.cantidad, p.nombre_modelo
+FROM ventas v JOIN detalle_venta d ON v.id_venta = d.id_venta
+JOIN productos p ON d.id_producto = p.id_producto
+WHERE v.numero_factura = 'FAC-TX-001';
+
+-- EJECUCIÓN 
+CALL tx_venta_segura('FAC-TX-001', 1, 1, 2, 1, 'Tarjeta');
+
+-- VERIFICACIÓN
+SELECT v.numero_factura, v.total_factura, d.cantidad, p.nombre_modelo
+FROM ventas v
+JOIN detalle_venta d ON v.id_venta = d.id_venta
+JOIN productos p ON d.id_producto = p.id_producto
+WHERE v.numero_factura = 'FAC-TX-001';
+
+-- 2. Actualización Masiva de Precios
+DELIMITER //
+CREATE PROCEDURE tx_precios(IN p_cat INT, IN p_porc DECIMAL(5,2))
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION 
+    BEGIN 
+        ROLLBACK; 
+        SELECT 'Error: ROLLBACK ejecutado' AS Estado; 
+    END;
+
+    START TRANSACTION;
+    
+    UPDATE productos 
+    SET precio_venta = precio_venta * (1 + (p_porc / 100))
+    WHERE id_categoria = p_cat;
+    
+    INSERT INTO auditoria (nombre_tabla, accion_realizada, usuario_db, detalle_cambios)
+    VALUES ('productos', 'UPDATE MASIVO', CURRENT_USER(), CONCAT('Aumento ', p_porc, '% a cat ', p_cat));
+    
+    COMMIT;
+    SELECT 'Éxito: Cambios guardados (COMMIT)' AS Estado;
+END //
+DELIMITER ;
+
+-- EJECUCIÓN (Aumenta 10% a la categoría 1)
+CALL tx_precios(1, 10.00);
+
+-- VERIFICACIÓN
+SELECT id_producto, nombre_modelo, precio_venta 
+FROM productos WHERE id_categoria = 1;
+
+-- 3. Compra a Proveedor
+DELIMITER //
+CREATE PROCEDURE tx_compra_proveedor(IN p_prod INT, IN p_cant INT, IN p_emp INT, IN p_doc VARCHAR(100))
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION 
+    BEGIN 
+        ROLLBACK; 
+        SELECT 'Error: Falla de Integridad. ROLLBACK aplicado.' AS Estado; 
+    END;
+
+    START TRANSACTION;
+    
+    -- 1. Actualiza stock físico del producto
+    UPDATE productos 
+    SET stock_actual = stock_actual + p_cant 
+    WHERE id_producto = p_prod;
+    
+    -- 2. Registra el movimiento histórico
+    INSERT INTO inventario (tipo_movimiento, cantidad, documento_referencia, id_producto, id_empleado)
+    VALUES ('ENTRADA COMPRA', p_cant, p_doc, p_prod, p_emp);
+    
+    COMMIT;
+    SELECT 'Éxito: Compra registrada con integridad (COMMIT)' AS Estado;
+END //
+DELIMITER ;
+
+-- EJECUCIÓN 
+CALL tx_compra_proveedor(1, 100, 2, 'Factura PROV-123');
+
+-- VERIFICACIÓN
+SELECT p.id_producto, p.nombre_modelo, p.stock_actual, i.tipo_movimiento, i.documento_referencia 
+FROM productos p JOIN inventario i ON p.id_producto = i.id_producto 
+WHERE i.documento_referencia = 'Factura PROV-123';
+
+-- 4. Transacción: Actualización Masiva de Inventario (ACID)
+DROP PROCEDURE IF EXISTS tx_masiva_inventario;
+DELIMITER //
+CREATE PROCEDURE tx_masiva_inventario(IN p_prov INT, IN p_bono_stock INT)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION 
+    BEGIN 
+        ROLLBACK; 
+        SELECT 'Error: Se rompió la Atomicidad. ROLLBACK ejecutado.' AS Estado; 
+    END;
+
+    START TRANSACTION;
+    
+    -- AISLAMIENTO Y CONSISTENCIA: Bloquea registros y suma el stock a todo un proveedor
+    UPDATE productos 
+    SET stock_actual = stock_actual + p_bono_stock 
+    WHERE id_proveedor = p_prov;
+    
+    -- Rastreo de auditoría masivo
+    INSERT INTO auditoria (nombre_tabla, accion_realizada, usuario_db, detalle_cambios)
+    VALUES ('productos', 'AJUSTE MASIVO ACID', CURRENT_USER(), CONCAT('Bono de ', p_bono_stock, ' unidades al proveedor ', p_prov));
+    
+    -- DURABILIDAD: Guarda permanentemente
+    COMMIT;
+    SELECT 'Éxito: Actualización masiva ACID completada (COMMIT)' AS Estado;
+END //
+DELIMITER ;
+
+-- EJECUCIÓN 
+CALL tx_masiva_inventario(1, 20);
+
+-- VERIFICACIÓN
+SELECT nombre_tabla, accion_realizada, detalle_cambios 
+FROM auditoria WHERE accion_realizada = 'AJUSTE MASIVO ACID'
+ORDER BY id_auditoria DESC LIMIT 
+
+-- Procedimiento para los permisos de Gerente
+DELIMITER //
+CREATE PROCEDURE clientes_frecuentes(IN monto_minimo DECIMAL(10,2))
+BEGIN
+    SELECT c.id_cliente, 
+           c.nombres_completos AS nombre_completo, 
+           SUM(v.total_factura) AS total_comprado
+    FROM clientes c
+    JOIN ventas v ON c.id_cliente = v.id_cliente
+    GROUP BY c.id_cliente, c.nombres_completos
+    HAVING SUM(v.total_factura) >= monto_minimo
+    ORDER BY total_comprado DESC;
+END //
+DELIMITER ;
 
 -- Usuarios, Roles y Privilegios
--- 1. CREACIÓN DE USUARIOS
+-- 1. CREACIÓN Y PERMISOS: Administrador
 CREATE USER 'usuario_admin'@'localhost' IDENTIFIED BY 'admin123';
-CREATE USER 'usuario_gerente'@'localhost' IDENTIFIED BY 'gerente123';
-CREATE USER 'usuario_cajero'@'localhost' IDENTIFIED BY 'cajero123';
-CREATE USER 'usuario_vendedor'@'localhost' IDENTIFIED BY 'vendedor123';
-CREATE USER 'usuario_auditor'@'localhost' IDENTIFIED BY 'auditor123';
 
-
-
--- 2. ASIGNACIÓN DE PRIVILEGIOS SEGÚN EL ROL OPERATIVO
--- ADMINISTRADOR: Control total de la estructura y manipulación de datos
+-- Asignación de roles
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP 
 ON SistemaCalzado_2026.* TO 'usuario_admin'@'localhost';
+FLUSH PRIVILEGES;
 
--- GERENTE: Lectura estratégica de datos core y ejecución de reportes analíticos
+-- VERIFICACIÓN
+SHOW GRANTS FOR 'usuario_admin'@'localhost';
+
+-- 2. CREACIÓN Y PERMISOS: Gerente
+CREATE USER 'usuario_gerente'@'localhost' IDENTIFIED BY 'gerente123';
+
+-- Permisos de lectura en tablas clave y vistas
 GRANT SELECT ON SistemaCalzado_2026.ventas TO 'usuario_gerente'@'localhost';
 GRANT SELECT ON SistemaCalzado_2026.clientes TO 'usuario_gerente'@'localhost';
 GRANT SELECT ON SistemaCalzado_2026.productos TO 'usuario_gerente'@'localhost';
-GRANT SELECT ON SistemaCalzado_2026.categorias TO 'usuario_gerente'@'localhost';
--- Permisos de lectura en vistas analíticas
-GRANT SELECT ON SistemaCalzado_2026.ClientesFrecuentes TO 'usuario_gerente'@'localhost';
-GRANT SELECT ON SistemaCalzado_2026.DesempenoVendedores TO 'usuario_gerente'@'localhost';
 GRANT SELECT ON SistemaCalzado_2026.VentasConsolidadas TO 'usuario_gerente'@'localhost';
--- Permiso de ejecución para procedimientos de reportes
-GRANT EXECUTE ON PROCEDURE SistemaCalzado_2026.AplicarPromocion TO 'usuario_gerente'@'localhost';
+GRANT SELECT ON SistemaCalzado_2026.DesempenoVendedores TO 'usuario_gerente'@'localhost';
 
--- CAJERO: Gestión operativa de puntos de venta y facturación directa
+-- Permisos para ejecutar procedimientos de reportes
+GRANT EXECUTE ON PROCEDURE SistemaCalzado_2026.calcular_ventas_mensuales TO 'usuario_gerente'@'localhost';
+GRANT EXECUTE ON PROCEDURE SistemaCalzado_2026.clientes_frecuentes TO 'usuario_gerente'@'localhost';
+
+FLUSH PRIVILEGES;
+
+-- VERIFICACIÓN
+SHOW GRANTS FOR 'usuario_gerente'@'localhost';
+
+-- 3. CREACIÓN Y PERMISOS: Cajero
+CREATE USER 'usuario_cajero'@'localhost' IDENTIFIED BY 'cajero123';
+
+-- Permisos de lectura en catálogos y escritura en ventas
 GRANT SELECT ON SistemaCalzado_2026.clientes TO 'usuario_cajero'@'localhost';
 GRANT SELECT ON SistemaCalzado_2026.productos TO 'usuario_cajero'@'localhost';
 GRANT INSERT ON SistemaCalzado_2026.ventas TO 'usuario_cajero'@'localhost';
 GRANT INSERT ON SistemaCalzado_2026.detalle_venta TO 'usuario_cajero'@'localhost';
--- Permiso para ejecutar la automatización de la facturación
-GRANT EXECUTE ON PROCEDURE SistemaCalzado_2026.RegistrarVenta TO 'usuario_cajero'@'localhost';
 
--- VENDEDOR: Consulta de catálogos, vistas comerciales e inserción de nuevas ventas
+-- Permiso exclusivo para ejecutar la transacción de venta
+GRANT EXECUTE ON PROCEDURE SistemaCalzado_2026.registrar_venta TO 'usuario_cajero'@'localhost';
+FLUSH PRIVILEGES;
+
+-- VERIFICACIÓN
+SHOW GRANTS FOR 'usuario_cajero'@'localhost';
+
+-- 4. CREACIÓN Y PERMISOS: Vendedor
+CREATE USER 'usuario_vendedor'@'localhost' IDENTIFIED BY 'vendedor123';
+
+-- Permisos de lectura y registro de sus ventas
 GRANT SELECT ON SistemaCalzado_2026.clientes TO 'usuario_vendedor'@'localhost';
 GRANT SELECT ON SistemaCalzado_2026.productos TO 'usuario_vendedor'@'localhost';
 GRANT SELECT ON SistemaCalzado_2026.VentasConsolidadas TO 'usuario_vendedor'@'localhost';
 GRANT INSERT ON SistemaCalzado_2026.ventas TO 'usuario_vendedor'@'localhost';
 GRANT INSERT ON SistemaCalzado_2026.detalle_venta TO 'usuario_vendedor'@'localhost';
+FLUSH PRIVILEGES;
 
--- AUDITOR: Acceso exclusivo de lectura a registros de control y logs de auditoría
+-- VERIFICACIÓN
+SHOW GRANTS FOR 'usuario_vendedor'@'localhost';
+
+-- 5. CREACIÓN Y PERMISOS: Auditor
+CREATE USER 'usuario_auditor'@'localhost' IDENTIFIED BY 'auditor123';
+
+-- Acceso exclusivo de lectura a registros de control (Cero edición)
 GRANT SELECT ON SistemaCalzado_2026.auditoria TO 'usuario_auditor'@'localhost';
-GRANT SELECT ON SistemaCalzado_2026.inventario TO 'usuario_auditor'@'localhost';
 GRANT SELECT ON SistemaCalzado_2026.DevolucionesDetalladas TO 'usuario_auditor'@'localhost';
 GRANT SELECT ON SistemaCalzado_2026.ProductosBajoStock TO 'usuario_auditor'@'localhost';
-
--- 3. APLICACIÓN EFECTIVA DE PRIVILEGIOS
 FLUSH PRIVILEGES;
-SHOW GRANTS FOR 'usuario_admin'@'localhost';
-SHOW GRANTS FOR 'usuario_gerente'@'localhost';
-SHOW GRANTS FOR 'usuario_cajero'@'localhost';
-SHOW GRANTS FOR 'usuario_vendedor'@'localhost';
+
+-- VERIFICACIÓN
 SHOW GRANTS FOR 'usuario_auditor'@'localhost';
